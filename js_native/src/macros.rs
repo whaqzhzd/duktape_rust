@@ -18,3 +18,24 @@ macro_rules! duk_reference_error {
         return Err($crate::error::ErrorKind::ReferenceError($msg.to_owned()).into());
     };
 }
+
+#[macro_export]
+macro_rules! register_native_module {
+    ($msg: expr) => {
+       
+    };
+}
+
+#[cfg(test)]
+mod test {
+    struct A{
+
+    }
+
+    register_native_module!(A);
+
+    #[test]
+    fn test(){
+
+    }
+}

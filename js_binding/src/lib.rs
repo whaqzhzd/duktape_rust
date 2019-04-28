@@ -10,26 +10,22 @@ extern crate js_native;
 extern crate log;
 extern crate env_logger;
 
-use chrono::Local;
-use std::io::Write;
+use js_native::prelude::DukResult;
+use js_native::DukContext;
+
 
 mod gfx;
 mod polyfills;
 
-pub fn init_js_binding() {
-    // 初始化日志
-    let env = env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "trace");
-    env_logger::Builder::from_env(env)
-        .format(|buf, record| {
-            writeln!(
-                buf,
-                "{} {} [{}:{}:{}]",
-                Local::now().format("%Y-%m-%d %H:%M:%S"),
-                record.level(),
-                record.module_path().unwrap_or("<unnamed>"),
-                record.line().unwrap_or(0),
-                &record.args()
-            )
-        })
-        .init();
+use polyfills::console::console_register;
+use polyfills::timer::timer_register;
+
+pub fn init_js_binding(ctx: &DukContext) -> DukResult<()> {
+    // 注册日志模块
+    console_register(ctx)?;
+    // 注册时间类模块
+    timer_register(ctx)?;
+
+
+    Ok(())
 }

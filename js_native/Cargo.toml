@@ -9,3 +9,4 @@ dukbind = "^0.0.4"
 typemap = "^0.3.3"
 error-chain = "^0.12"
 bitflags = "^1.0.4"
+value = { git = "https://github.com/kildevaeld/value-rs", optional = true, features = ["datetime"] }

@@ -1,3 +1,7 @@
+//!
+//! duktape引擎的safe包装
+//! 
+
 #[macro_use]
 extern crate error_chain;
 extern crate typemap;
