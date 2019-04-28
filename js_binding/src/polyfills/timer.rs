@@ -7,11 +7,12 @@
 //!
 
 use js_native::prelude::*;
+const EVENT_TIMES: &'static str = "eventTimers";
 
 pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
     ctx.push_global_stash();
     ctx.push_object();
-    ctx.put_prop_string(-2, "eventTimers");
+    ctx.put_prop_string(-2, EVENT_TIMES);
     ctx.pop(1);
 
     let mut builder = class::build();
@@ -21,7 +22,7 @@ pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
         (2, |ctx: &DukContext, _this: &mut class::Instance| {
             // let func = ctx.get::<Function>(0)?;
             ctx.push_global_stash();
-            ctx.get_prop_string(-1, "eventTimers");
+            ctx.get_prop_string(-1, EVENT_TIMES);
             ctx.push_number(1);
             ctx.dup(0);
             ctx.duk_put_prop(-3);
@@ -58,7 +59,7 @@ mod test {
 
         loop {
             ctx.push_global_stash();
-            ctx.get_prop_string(-1, "eventTimers");
+            ctx.get_prop_string(-1, EVENT_TIMES);
             ctx.push_number(1);
             ctx.duk_get_prop(-2);
             ctx.call(0)?;
