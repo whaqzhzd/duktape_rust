@@ -498,6 +498,20 @@ impl DukContext {
         self
     }
 
+    pub fn duk_put_prop(&self, index: i32) -> &Self {
+        unsafe {
+            duk_put_prop(self.inner, index);
+        }
+        self
+    }
+
+    pub fn duk_get_prop(&self, index: i32) -> &Self {
+        unsafe {
+            duk_get_prop(self.inner, index);
+        }
+        self
+    }
+
     pub fn get_prop_index(&self, aidx: Idx, index: u32) -> &Self {
         unsafe {
             duk_get_prop_index(self.inner, aidx, index);
