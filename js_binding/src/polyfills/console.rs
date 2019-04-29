@@ -4,9 +4,9 @@
 //! rust 版本
 //!
 
+use chrono::Local;
 use js_native::prelude::*;
 use std::io::Write;
-use chrono::Local;
 
 pub fn console_register(ctx: &DukContext) -> DukResult<()> {
     // 初始化日志
@@ -31,8 +31,24 @@ pub fn console_register(ctx: &DukContext) -> DukResult<()> {
         .method(
             "log",
             (1, |ctx: &DukContext, _this: &mut class::Instance| {
-                let log = ctx.get::<String>(0)?;
-                info!("{:?}", log);
+                match ctx.get_type(0) {
+                    Type::Object => {
+                        let log = ctx.get::<Object>(0)?;
+                        info!("obj : {}", log);
+                    }
+                    Type::String => {
+                        let log = ctx.get::<String>(0)?;
+                        info!("string : {:?}", log);
+                    }
+                    Type::Undefined => {
+                        info!("undefined");
+                    }
+                    Type::Number => {
+                        let log = ctx.get::<i32>(0)?;
+                        info!("number : {:?}", log);
+                    }
+                    _ => {}
+                }
                 Ok(1)
             }),
         )
@@ -65,9 +81,13 @@ mod test {
             for(var i=0,l=10;i<l;i++){
                 console.log("大明在js里面调用了rust。很强");
             }
+
+            console.log(Duktape.version);
         "#,
         )?
         .get(-1)?;
+
+        ctx;
 
         Ok(())
     }
