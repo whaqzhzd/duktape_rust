@@ -30,3 +30,5 @@ pub fn init_js_binding(ctx: &DukContext) -> DukResult<()> {
 
     Ok(())
 }
+
+pub use polyfills::timer::enter_frame;
