@@ -7,21 +7,28 @@
 //!
 
 use js_native::prelude::*;
-use std::cell::RefCell;
-use std::sync::Mutex;
 use std::time::SystemTime;
 
 const FPS: u32 = 60;
 const EVENT_TIMES: &'static str = "eventTimers";
 
 lazy_static! {
-    pub static ref V: Mutex<Vec<RefCell<EvTime>>> = Mutex::new(Vec::new());
-    pub static ref GID: Mutex<i32> = Mutex::new(1);
+    // pub static ref GID: Mutex<i32> = Mutex::new(1);
 }
 
-use std::ptr;
+/// 非线程安全的全局可变变量
+///
+/// 用来保存定时器
+///
+/// 切勿在多线程中使用
+static mut V: *mut Vec<EvTime> = 0 as *mut Vec<EvTime>;
 
-static mut VEC: *mut Vec<EvTime> = ptr::null_mut::<Vec<EvTime>>();
+/// 非线程安全的全局唯一ID
+///
+/// 用来自增定时器索引
+///
+/// 切勿在多线程中使用
+static mut GID: *mut i32 = 0 as *mut i32;
 
 #[derive(Debug)]
 enum TimeType {
@@ -38,6 +45,38 @@ pub struct EvTime {
     start: u128,
     execute_num: u32,
     time: SystemTime,
+    delete: bool,
+}
+
+/// 初始化
+fn init_v() {
+    let vec = <Vec<EvTime>>::new();
+    unsafe {
+        if V == 0 as *mut Vec<EvTime> {
+            V = std::mem::transmute(Box::new(vec));
+        }
+    }
+
+    let gid = 1;
+    unsafe {
+        if GID == 0 as *mut i32 {
+            GID = std::mem::transmute(Box::new(gid));
+        }
+    }
+}
+
+/// id 生成器
+fn generator_id() -> i32 {
+    unsafe {
+        let id = *GID;
+        if id >= i32::max_value() {
+            *GID = 0;
+        } else {
+            *GID = id + 1;
+        }
+
+        id
+    }
 }
 
 ///
@@ -64,6 +103,8 @@ pub struct EvTime {
 /// `ctx` - DukContext
 ///
 pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
+    init_v();
+
     ctx.push_global_stash();
     ctx.push_object();
     ctx.put_prop_string(-2, EVENT_TIMES);
@@ -76,23 +117,24 @@ pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
         (2, |ctx: &DukContext, _this: &mut class::Instance| {
             ctx.push_global_stash();
             ctx.get_prop_string(-1, EVENT_TIMES);
-            let mut v = V.lock().unwrap();
-            let id = *GID.lock().unwrap();
-            let time = EvTime {
-                id: id,
-                delay: ctx.get_number(1)? as u128,
-                start: 0,
-                execute_num: 0,
-                timetype: TimeType::LOOP,
-                time: SystemTime::now(),
-            };
-            ctx.push_number(id);
-            v.push(RefCell::new(time));
-            ctx.dup(0);
-            ctx.duk_put_prop(-3);
-
-            *GID.lock().unwrap() = id + 1;
-            Ok(1)
+            unsafe {
+                let v = &mut *V;
+                let id = generator_id();
+                let time = EvTime {
+                    id: id,
+                    delay: ctx.get_number(1)? as u128,
+                    start: 0,
+                    execute_num: 0,
+                    timetype: TimeType::LOOP,
+                    time: SystemTime::now(),
+                    delete: false,
+                };
+                ctx.push_number(id);
+                v.push(time);
+                ctx.dup(0);
+                ctx.duk_put_prop(-3);
+                Ok(1)
+            }
         }),
     );
 
@@ -102,25 +144,26 @@ pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
         .push_function((2, |ctx: &DukContext| {
             ctx.push_global_stash();
             ctx.get_prop_string(-1, EVENT_TIMES);
-            let mut v = V.lock().unwrap();
-            let id = *GID.lock().unwrap();
-            let time = EvTime {
-                id: id,
-                start: 0,
-                execute_num: 0,
-                delay: ctx.get_number(1)? as u128,
-                timetype: TimeType::TIMEOUT,
-                time: SystemTime::now(),
-            };
-            ctx.push_number(id);
-            v.push(RefCell::new(time));
-            ctx.dup(0);
-            ctx.duk_put_prop(-3);
-            *GID.lock().unwrap() = id + 1;
+            unsafe {
+                let v = &mut *V;
+                let id = generator_id();
+                let time = EvTime {
+                    id: id,
+                    start: 0,
+                    execute_num: 0,
+                    delay: ctx.get_number(1)? as u128,
+                    timetype: TimeType::TIMEOUT,
+                    time: SystemTime::now(),
+                    delete: false,
+                };
+                ctx.push_number(id);
+                v.push(time);
+                ctx.dup(0);
+                ctx.duk_put_prop(-3);
 
-            ctx.push_number(id);
-            info!("setTimeout {}", id);
-            Ok(1)
+                ctx.push_number(id);
+                Ok(1)
+            }
         }))
         .put_prop_string(-2, "setTimeout")
         .pop(1);
@@ -130,10 +173,14 @@ pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
             match ctx.get_type(0) {
                 Type::Number => {
                     let id = ctx.get::<i32>(0)?;
-                    let mut v = V.lock().unwrap();
-                    v.retain(|t| t.borrow().id != id);
-
-                    info!("clearTimeout {:#?}", v);
+                    unsafe {
+                        let v = &mut *V;
+                        for t in v.iter_mut() {
+                            if t.id == id {
+                                t.delete = true;
+                            }
+                        }
+                    }
                 }
                 _ => {
                     error!("clearTimeout args must be number");
@@ -149,25 +196,26 @@ pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
         .push_function((2, |ctx: &DukContext| {
             ctx.push_global_stash();
             ctx.get_prop_string(-1, EVENT_TIMES);
-            let mut v = V.lock().unwrap();
-            let id = *GID.lock().unwrap();
-            let time = EvTime {
-                id: id,
-                start: 0,
-                execute_num: 0,
-                delay: ctx.get_number(1)? as u128,
-                timetype: TimeType::INTERVAL,
-                time: SystemTime::now(),
-            };
-            ctx.push_number(id);
-            v.push(RefCell::new(time));
-            ctx.dup(0);
-            ctx.duk_put_prop(-3);
-            *GID.lock().unwrap() = id + 1;
-            info!("setInterval {}", id);
+            unsafe {
+                let v = &mut *V;
+                let id = generator_id();
+                let time = EvTime {
+                    id: id,
+                    start: 0,
+                    execute_num: 0,
+                    delay: ctx.get_number(1)? as u128,
+                    timetype: TimeType::INTERVAL,
+                    time: SystemTime::now(),
+                    delete: false,
+                };
+                ctx.push_number(id);
+                v.push(time);
+                ctx.dup(0);
+                ctx.duk_put_prop(-3);
 
-            ctx.push_number(id);
-            Ok(1)
+                ctx.push_number(id);
+                Ok(1)
+            }
         }))
         .put_prop_string(-2, "setInterval")
         .pop(1);
@@ -176,14 +224,15 @@ pub fn timer_register(ctx: &DukContext) -> DukResult<()> {
         .push_function((2, |ctx: &DukContext| {
             match ctx.get_type(0) {
                 Type::Number => {
-                    info!("clearInterval {:#?}", 1);
                     let id = ctx.get::<i32>(0)?;
-                    info!("clearInterval {:#?}", 23);
-                    // let mut v = V.lock().unwrap();
-                    info!("clearInterval {:#?}", 2);
-                    // v.retain(|t| t.borrow().id != id);
-
-                    // info!("clearInterval {:#?}", v);
+                    unsafe {
+                        let v = &mut *V;
+                        for t in v.iter_mut() {
+                            if t.id == id {
+                                t.delete = true;
+                            }
+                        }
+                    }
                 }
                 _ => {
                     error!("clearInterval args must be number");
@@ -205,32 +254,32 @@ mod test {
     use crate::init_js_binding;
 
     use std::collections::HashSet;
-    static mut hash_map: *mut HashSet<String> = 0 as *mut HashSet<String>;
+    static mut HASH_MAP: *mut HashSet<String> = 0 as *mut HashSet<String>;
 
     #[test]
     fn ptr_test() {
         let map: HashSet<String> = HashSet::new();
         let set = unsafe {
-            if hash_map == 0 as *mut HashSet<String> {
-                hash_map = std::mem::transmute(Box::new(map));
+            if HASH_MAP == 0 as *mut HashSet<String> {
+                HASH_MAP = std::mem::transmute(Box::new(map));
             }
-            &mut *hash_map
+            &mut *HASH_MAP
         };
 
         set.insert("s".to_string());
 
         unsafe {
-            let c = hash_map.as_ref().unwrap();
+            let c = HASH_MAP.as_ref().unwrap();
             assert_eq!(set, c);
         }
 
         unsafe {
-            let c = hash_map.as_mut().unwrap();
+            let c = HASH_MAP.as_mut().unwrap();
             c.insert("s".to_string());
         }
 
         unsafe {
-            let c = hash_map.as_ref().unwrap();
+            let c = HASH_MAP.as_ref().unwrap();
             assert_eq!(set, c);
         }
     }
@@ -246,39 +295,49 @@ mod test {
            
 
             var id = setInterval(function(){
-                // console.log("setInterval---");
+                console.log("setInterval---");
             },10);
-
-            console.log("setInterval id:"+id);
-
             
             setTimeout(function(){
                 console.log("setTimeout---:");
                 
-                clearInterval(id);
-            },20);
+                // clearInterval(id);
+                clearTimeout(id);
+            },21);
         "#,
         )?
         .get(-1)?;
 
         loop {
-            let mut v = V.lock().unwrap();
-            v.retain(|t| {
-                let mut t = t.borrow_mut();
-                if t.time.elapsed().unwrap().as_millis() - t.start >= t.delay {
-                    ctx.push_global_stash();
-                    ctx.get_prop_string(-1, EVENT_TIMES);
-                    ctx.push_number(t.id);
-                    ctx.duk_get_prop(-2);
-                    ctx.call(0);
-                    ctx.pop(1);
-                    ctx.pop(2);
+            unsafe {
+                let v = &mut *V;
+                for t in v.iter_mut() {
+                    if t.time.elapsed().unwrap().as_millis() - t.start >= t.delay {
+                        match t.timetype {
+                            TimeType::TIMEOUT => {
+                                if t.execute_num >= 1 {
+                                    continue;
+                                }
+                            }
+                            _ => {}
+                        }
 
-                    t.start = 0;
-                    t.time = SystemTime::now();
+                        ctx.push_global_stash();
+                        ctx.get_prop_string(-1, EVENT_TIMES);
+                        ctx.push_number(t.id);
+                        ctx.duk_get_prop(-2);
+                        ctx.call(0);
+                        ctx.pop(1);
+                        ctx.pop(2);
+                        t.execute_num = t.execute_num + 1;
+
+                        t.start = 0;
+                        t.time = SystemTime::now();
+                    }
                 }
-                true
-            });
+
+                v.retain(|t| !t.delete);
+            }
         }
 
         ctx;
