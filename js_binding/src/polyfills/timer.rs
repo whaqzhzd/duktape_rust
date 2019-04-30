@@ -44,16 +44,6 @@ static mut RAF: *mut EvTime = null_mut::<EvTime>();
 /// 切勿在多线程中使用
 static mut STOPWATCH: *mut Stopwatch = null_mut::<Stopwatch>();
 
-/// 上下两帧的时间差
-#[derive(Debug, Default)]
-pub struct DeltaTime(u64);
-
-impl DeltaTime {
-    pub fn new(value: u64) -> DeltaTime {
-        DeltaTime(value)
-    }
-}
-
 /// 秒表
 pub struct Stopwatch {
     watch: SystemTime,
